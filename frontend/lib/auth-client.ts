@@ -4,25 +4,13 @@
  * Provides client-side authentication utilities for React components.
  */
 
-import { createAuthClient } from "better-auth/client";
+import { createAuthClient } from "better-auth/react";
 
 // Create auth client instance
-// Use NEXT_PUBLIC_ prefix for client-side access
-// In browser, if NEXT_PUBLIC_APP_URL is not set, use window.location.origin
-const getBaseURL = () => {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL;
-  }
-  // In browser, use current origin
-  if (typeof window !== "undefined") {
-    return window.location.origin;
-  }
-  // Fallback for server-side
-  return "";
-};
-
+// Better Auth will automatically use the current origin for API calls
 export const authClient = createAuthClient({
-  baseURL: getBaseURL(),
+  // baseURL is optional - Better Auth uses current origin by default
+  baseURL: process.env.NEXT_PUBLIC_APP_URL || undefined,
 });
 
 // Re-export commonly used methods
