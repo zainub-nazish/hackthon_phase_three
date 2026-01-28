@@ -7,10 +7,11 @@
 import { createAuthClient } from "better-auth/react";
 
 // Create auth client instance
-// Using empty string makes all auth API calls relative to current origin
-// This works correctly in both development (localhost:3000) and production (vercel.app)
+// NEXT_PUBLIC_APP_URL must be set in environment:
+//   Local: .env.local → http://localhost:3000
+//   Vercel: Environment Variables → https://frontend-delta-two-31.vercel.app
 export const authClient = createAuthClient({
-  baseURL: "",
+  baseURL: process.env.NEXT_PUBLIC_APP_URL || "https://frontend-delta-two-31.vercel.app",
 });
 
 // Re-export commonly used methods
