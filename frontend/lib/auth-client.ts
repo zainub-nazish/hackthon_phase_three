@@ -2,6 +2,7 @@
  * Better Auth client-side helper.
  *
  * Provides client-side authentication utilities for React components.
+ * Build: 2026-01-29-v2
  */
 
 import { createAuthClient } from "better-auth/react";
