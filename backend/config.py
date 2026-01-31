@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     cors_origins: list[str] = Field(
-        default=["http://localhost:3000"],
+        default=["https://frontend-delta-two-31.vercel.app"],
         description="Allowed origins for CORS"
     )
 
