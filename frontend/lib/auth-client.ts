@@ -2,26 +2,16 @@
  * Better Auth client-side helper.
  *
  * Provides client-side authentication utilities for React components.
- * Build: 2026-01-31-v6 - Auto-detect URL
+ * Build: 2026-02-02-v7 - Fixed URL detection for Vercel
  */
 
 import { createAuthClient } from "better-auth/react";
 
-// Auto-detect the base URL
-// In browser: use current origin (works for both localhost and Vercel)
-// In server: use NEXT_PUBLIC_APP_URL or fallback to production URL
-function getBaseURL(): string {
-  if (typeof window !== "undefined") {
-    // Client-side: use current origin
-    return window.location.origin;
-  }
-  // Server-side: use env variable or production URL
-  return process.env.NEXT_PUBLIC_APP_URL || "https://frontend-delta-two-31.vercel.app";
-}
-
-// Create auth client with auto-detected URL
+// Create auth client - baseURL will be automatically detected by Better Auth
+// When baseURL is not provided, Better Auth uses the current origin
 export const authClient = createAuthClient({
-  baseURL: getBaseURL(),
+  // Don't set baseURL - let Better Auth auto-detect from current origin
+  // This ensures it works correctly on both localhost and Vercel
 });
 
 // Re-export commonly used methods
