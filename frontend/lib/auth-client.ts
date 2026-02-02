@@ -2,47 +2,29 @@
  * Better Auth client-side helper.
  *
  * Provides client-side authentication utilities for React components.
- * Build: 2026-02-02-v9 - Lazy initialization for correct URL
+ * Build: 2026-02-02-v10 - Hardcoded production URL
  */
 
 import { createAuthClient } from "better-auth/react";
 
-// Lazy-initialized auth client
-let _authClient: ReturnType<typeof createAuthClient> | null = null;
+// Use NEXT_PUBLIC env var (available at build time) or hardcoded production URL
+const BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://frontend-delta-two-31.vercel.app";
 
-function getAuthClient() {
-  if (!_authClient) {
-    // Get the correct base URL
-    const baseURL = typeof window !== "undefined"
-      ? window.location.origin
-      : "https://frontend-delta-two-31.vercel.app";
+console.log("[Auth Client] Using baseURL:", BASE_URL);
 
-    console.log("[Auth Client] Initializing with baseURL:", baseURL);
+// Create auth client with production URL
+export const authClient = createAuthClient({
+  baseURL: BASE_URL,
+});
 
-    _authClient = createAuthClient({ baseURL });
-  }
-  return _authClient;
-}
-
-// Export auth client getter
-export const authClient = {
-  get signIn() { return getAuthClient().signIn; },
-  get signUp() { return getAuthClient().signUp; },
-  get signOut() { return getAuthClient().signOut; },
-  get useSession() { return getAuthClient().useSession; },
-  get getSession() { return getAuthClient().getSession; },
-};
-
-// Re-export commonly used methods as functions
-export const signIn = {
-  get email() { return getAuthClient().signIn.email; },
-};
-export const signUp = {
-  get email() { return getAuthClient().signUp.email; },
-};
-export const signOut = () => getAuthClient().signOut();
-export const useSession = () => getAuthClient().useSession();
-export const getSession = () => getAuthClient().getSession();
+// Re-export commonly used methods
+export const {
+  signIn,
+  signUp,
+  signOut,
+  useSession,
+  getSession,
+} = authClient;
 
 /**
  * Get the current session token for API requests.
