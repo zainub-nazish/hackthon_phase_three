@@ -13,6 +13,12 @@ sqlmodel>=0.0.16
 asyncpg>=0.29.0
 greenlet>=3.0.0
 
+# AI Agent
+anthropic>=0.79.0
+
+# MCP (Model Context Protocol)
+mcp>=1.26.0,<2.0.0
+
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

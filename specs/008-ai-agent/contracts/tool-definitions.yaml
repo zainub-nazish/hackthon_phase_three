@@ -1,0 +1,121 @@
+# AI Agent Tool Definitions
+# These are the Anthropic tool-use JSON Schema definitions for the 5 task management tools.
+# The agent passes these to the Claude API in the `tools` parameter.
+
+tools:
+  - name: add_task
+    description: >
+      Create a new task for the user. Use this tool when the user wants to add, create,
+      or make a new task. Extract the task title from the user's message. If the user
+      also provides a description or details, include those as well. The title is required
+      and should be a clear, concise summary of the task.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: "The task title — a clear, concise summary (1-255 characters)"
+        description:
+          type: string
+          description: "Optional additional details or context for the task (max 2000 characters)"
+      required:
+        - title
+
+  - name: list_tasks
+    description: >
+      List the user's tasks. Use this tool when the user wants to see, show, view, or check
+      their tasks. You can filter by status: "all" shows everything, "pending" shows only
+      incomplete tasks, and "completed" shows only finished tasks. Also use this tool when
+      you need to find a specific task by name before performing an action like complete,
+      delete, or update — this helps you get the correct task_id.
+    input_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - all
+            - pending
+            - completed
+          description: "Filter tasks by status. Defaults to 'all' if not specified."
+      required: []
+
+  - name: complete_task
+    description: >
+      Mark a task as completed/done. Use this tool when the user wants to complete, finish,
+      or mark a task as done. Requires the task_id (UUID) of the task to complete. If the
+      user refers to a task by name instead of ID, first use list_tasks to find the matching
+      task and get its task_id, then call this tool.
+    input_schema:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: "The UUID of the task to mark as completed"
+      required:
+        - task_id
+
+  - name: delete_task
+    description: >
+      Delete/remove a task permanently. Use this tool when the user wants to delete, remove,
+      or get rid of a task. Requires the task_id (UUID) of the task to delete. If the user
+      refers to a task by name instead of ID, first use list_tasks to find the matching task
+      and get its task_id, then call this tool. This action cannot be undone.
+    input_schema:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: "The UUID of the task to delete permanently"
+      required:
+        - task_id
+
+  - name: update_task
+    description: >
+      Update/modify an existing task's title or description. Use this tool when the user
+      wants to change, rename, edit, or update a task. Requires the task_id (UUID) of the
+      task to update, plus at least one field to change (title and/or description). If the
+      user refers to a task by name instead of ID, first use list_tasks to find the matching
+      task and get its task_id, then call this tool.
+    input_schema:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: "The UUID of the task to update"
+        title:
+          type: string
+          description: "New title for the task (1-255 characters)"
+        description:
+          type: string
+          description: "New description for the task (max 2000 characters)"
+      required:
+        - task_id
+
+# System prompt for the AI agent
+system_prompt: |
+  You are a friendly AI todo assistant. You help users manage their tasks through natural language conversation.
+
+  ## Your Capabilities
+  You can create, list, complete, delete, and update tasks for the user.
+
+  ## Guidelines
+  - Always confirm actions with a brief, friendly message
+  - When the user asks to complete, delete, or update a task by name, use list_tasks first to find the correct task_id
+  - If multiple tasks match the user's description, show the matches and ask which one they mean
+  - Never make up or hallucinate task data — only reference tasks that exist in the user's list
+  - Resolve references like "it", "that task", or "the last one" from conversation context
+  - If you can't determine what the user wants, ask for clarification
+  - For non-task messages (greetings, questions about capabilities), respond helpfully without using tools
+  - Keep responses concise and conversational
+
+  ## Response Format
+  - Task created: include the task title in your confirmation
+  - Task listed: present tasks in a readable format with titles and status
+  - Task completed/deleted/updated: confirm the specific task that was changed
+  - Errors: explain what went wrong in simple terms and suggest what to try
+
+  ## Important
+  - You can only manage tasks — you cannot browse the web, send emails, or perform other actions
+  - All task operations only affect the current user's tasks
+  - If a tool call fails, explain the error to the user without exposing technical details

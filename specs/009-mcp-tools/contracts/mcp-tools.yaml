@@ -1,0 +1,141 @@
+# MCP Tool Contracts — 009-mcp-tools
+# These define the MCP tool server's internal API, NOT external HTTP endpoints.
+# The AI agent invokes these tools via the MCP bridge.
+
+tools:
+  - name: add_task
+    description: >
+      Create a new task for the user. Use this tool when the user wants to add,
+      create, or make a new task. Extract the task title from the user's message.
+      If the user also provides a description or details, include those as well.
+      The title is required and should be a clear, concise summary of the task.
+    input_schema:
+      type: object
+      properties:
+        title:
+          type: string
+          description: "The task title — a clear, concise summary (1-255 characters)"
+        description:
+          type: string
+          description: "Optional additional details or context for the task (max 2000 characters)"
+      required:
+        - title
+    output_schema:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        completed: { type: boolean }
+
+  - name: list_tasks
+    description: >
+      List the user's tasks. Use this tool when the user wants to see, show,
+      view, or check their tasks. Filter by status: "all" shows everything,
+      "pending" shows only incomplete tasks, "completed" shows only finished
+      tasks. Also use this tool to find a task by name before performing
+      complete, delete, or update.
+    input_schema:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [all, pending, completed]
+          description: "Filter tasks by status. Defaults to 'all' if not specified."
+      required: []
+    output_schema:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              title: { type: string }
+              description: { type: string, nullable: true }
+              completed: { type: boolean }
+        count: { type: integer }
+
+  - name: complete_task
+    description: >
+      Mark a task as completed/done. Use this tool when the user wants to
+      complete, finish, or mark a task as done. Requires the task_id (UUID).
+      If the user refers to a task by name, first use list_tasks to find
+      the matching task and get its task_id.
+    input_schema:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: "The UUID of the task to mark as completed"
+      required:
+        - task_id
+    output_schema:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        completed: { type: boolean }
+
+  - name: delete_task
+    description: >
+      Delete/remove a task permanently. Use this tool when the user wants to
+      delete, remove, or get rid of a task. Requires the task_id (UUID).
+      If the user refers to a task by name, first use list_tasks to find
+      the matching task. This action cannot be undone.
+    input_schema:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: "The UUID of the task to delete permanently"
+      required:
+        - task_id
+    output_schema:
+      type: object
+      properties:
+        deleted: { type: boolean }
+        id: { type: string, format: uuid }
+        title: { type: string }
+
+  - name: update_task
+    description: >
+      Update/modify an existing task's title or description. Use this tool
+      when the user wants to change, rename, edit, or update a task.
+      Requires the task_id (UUID) plus at least one field to change.
+      If the user refers to a task by name, first use list_tasks to find
+      the matching task.
+    input_schema:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: "The UUID of the task to update"
+        title:
+          type: string
+          description: "New title for the task (1-255 characters)"
+        description:
+          type: string
+          description: "New description for the task (max 2000 characters)"
+      required:
+        - task_id
+    output_schema:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        completed: { type: boolean }
+
+# Error response (applies to all tools on failure)
+error_schema:
+  type: object
+  properties:
+    is_error: { type: boolean, const: true }
+    error: { type: string }
+
+# Internal contract: user_id injection
+# The MCP bridge injects user_id into every tool call.
+# user_id is NEVER exposed to the LLM as a tool parameter.
+# user_id is used for database WHERE clauses to enforce user isolation.

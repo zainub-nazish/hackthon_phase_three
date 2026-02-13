@@ -15,6 +15,7 @@ export function MobileNav({ className }: NavProps) {
 
   const navItems = [
     { href: "/tasks", label: "Tasks" },
+    { href: "/chat", label: "Chat" },
   ];
 
   return (
@@ -100,6 +101,7 @@ export function DesktopNav({ className }: NavProps) {
 
   const navItems = [
     { href: "/tasks", label: "Tasks" },
+    { href: "/chat", label: "Chat" },
   ];
 
   return (

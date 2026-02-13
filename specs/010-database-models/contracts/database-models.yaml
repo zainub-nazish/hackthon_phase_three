@@ -1,0 +1,237 @@
+# Database Model Contracts: Todo AI System
+# Defines CRUD operations, query patterns, and validation contracts
+# for Task, Conversation, Message, and ToolCall entities.
+
+# ===========================================================================
+# Task Operations
+# ===========================================================================
+
+task_create:
+  description: Create a new task for a user
+  input:
+    owner_id: string (required) # From authenticated user context
+    title: string (required, 1-255 chars, non-empty after trim)
+    description: string (optional, max 2000 chars)
+  output:
+    id: uuid (auto-generated)
+    owner_id: string
+    title: string
+    description: string | null
+    completed: false (default)
+    created_at: datetime (auto-generated)
+    updated_at: datetime (auto-generated)
+  validation:
+    - title must not be empty or whitespace-only
+    - title must be 255 characters or fewer
+    - description, if provided, must be 2000 characters or fewer
+  errors:
+    - 400: title empty or too long
+    - 400: description too long
+    - 401: user not authenticated
+
+task_read:
+  description: Retrieve a task by ID, scoped to the owning user
+  input:
+    task_id: uuid (required)
+    owner_id: string (required) # From authenticated user context
+  output:
+    id: uuid
+    owner_id: string
+    title: string
+    description: string | null
+    completed: boolean
+    created_at: datetime
+    updated_at: datetime
+  errors:
+    - 404: task not found or does not belong to user
+
+task_list:
+  description: List tasks for a user with optional filtering
+  input:
+    owner_id: string (required)
+    status: enum (optional) # "all" | "pending" | "completed", default "all"
+    limit: integer (optional, default 50, max 100)
+    offset: integer (optional, default 0)
+  output:
+    items: list[task]
+    total: integer
+    limit: integer
+    offset: integer
+  query_pattern:
+    - WHERE owner_id = :owner_id
+    - AND completed = :filter (if status != "all")
+    - ORDER BY created_at DESC
+    - LIMIT :limit OFFSET :offset
+
+task_update:
+  description: Partially update a task (title, description, completed)
+  input:
+    task_id: uuid (required)
+    owner_id: string (required)
+    title: string (optional, 1-255 chars if provided)
+    description: string (optional, max 2000 chars if provided)
+    completed: boolean (optional)
+  output:
+    id: uuid
+    owner_id: string
+    title: string
+    description: string | null
+    completed: boolean
+    created_at: datetime
+    updated_at: datetime (refreshed)
+  validation:
+    - at least one field must be provided
+    - title, if provided, must not be empty and must be <= 255 chars
+    - description, if provided, must be <= 2000 chars
+  errors:
+    - 400: no fields provided
+    - 400: title empty or too long
+    - 404: task not found or wrong user
+
+task_delete:
+  description: Delete a task permanently
+  input:
+    task_id: uuid (required)
+    owner_id: string (required)
+  output:
+    deleted: true
+    id: uuid
+    title: string
+  errors:
+    - 404: task not found or wrong user
+
+# ===========================================================================
+# Conversation Operations
+# ===========================================================================
+
+conversation_create:
+  description: Create a new conversation for a user
+  input:
+    owner_id: string (required)
+  output:
+    id: uuid (auto-generated)
+    owner_id: string
+    created_at: datetime (auto-generated)
+    updated_at: datetime (auto-generated)
+
+conversation_get_recent:
+  description: Get the most recent conversation for a user
+  input:
+    owner_id: string (required)
+  output:
+    conversation_id: uuid | null
+    created_at: datetime | null
+    updated_at: datetime | null
+  query_pattern:
+    - WHERE owner_id = :owner_id
+    - ORDER BY updated_at DESC
+    - LIMIT 1
+
+conversation_touch:
+  description: Update the conversation's updated_at timestamp
+  input:
+    conversation_id: uuid (required)
+  output:
+    updated_at: datetime (refreshed)
+
+# ===========================================================================
+# Message Operations
+# ===========================================================================
+
+message_create:
+  description: Create a new message in a conversation
+  input:
+    conversation_id: uuid (required, FK -> conversations.id)
+    role: enum (required) # "user" | "assistant"
+    content: string (required, non-empty)
+  output:
+    id: uuid (auto-generated)
+    conversation_id: uuid
+    role: string
+    content: string
+    created_at: datetime (auto-generated)
+  validation:
+    - conversation_id must reference an existing conversation
+    - role must be "user" or "assistant"
+    - content must not be empty
+  errors:
+    - 400: content empty
+    - 400: invalid role
+    - 404: conversation not found
+
+message_list_by_conversation:
+  description: List all messages in a conversation (chronological)
+  input:
+    conversation_id: uuid (required)
+    owner_id: string (required) # Verify conversation ownership
+  output:
+    conversation_id: uuid
+    messages: list[message]
+  query_pattern:
+    - JOIN conversations ON messages.conversation_id = conversations.id
+    - WHERE conversations.id = :conversation_id AND conversations.owner_id = :owner_id
+    - ORDER BY messages.created_at ASC
+
+# ===========================================================================
+# ToolCall Operations
+# ===========================================================================
+
+toolcall_create:
+  description: Record an AI tool invocation
+  input:
+    message_id: uuid (required, FK -> messages.id)
+    tool_name: string (required, max 100 chars)
+    parameters: string (required) # JSON-encoded
+    result: string (required) # JSON-encoded
+    status: enum (required) # "success" | "error"
+  output:
+    id: uuid (auto-generated)
+    message_id: uuid
+    tool_name: string
+    parameters: string
+    result: string
+    status: string
+    created_at: datetime (auto-generated)
+  validation:
+    - message_id must reference an existing message
+    - status must be "success" or "error"
+
+toolcall_list_by_message:
+  description: List all tool calls for a message
+  input:
+    message_id: uuid (required)
+  output:
+    list[toolcall]
+  query_pattern:
+    - WHERE message_id = :message_id
+    - ORDER BY created_at ASC
+
+# ===========================================================================
+# Multi-Step Operations (Agent Workflow)
+# ===========================================================================
+
+chat_send_message:
+  description: Complete chat flow — create/reuse conversation, save user message, call AI, save response
+  steps:
+    1: Validate user message (non-empty, <= 2000 chars)
+    2: Create or retrieve conversation (by conversation_id or create new)
+    3: Create Message (role="user", content=user_message)
+    4: Call AI agent (generate_response with conversation history)
+    5: Create Message (role="assistant", content=ai_response)
+    6: For each tool call in agent response, create ToolCall record
+    7: Touch conversation (update updated_at)
+    8: Return conversation_id + ai_response
+  atomicity: Steps 2-7 should be within a single database transaction
+
+# ===========================================================================
+# User Isolation Contract
+# ===========================================================================
+
+user_isolation:
+  description: All data access must be scoped to the authenticated user
+  rules:
+    - Task queries MUST filter by owner_id
+    - Conversation queries MUST filter by owner_id
+    - Message queries MUST join through conversation and verify owner_id
+    - ToolCall queries MUST join through message->conversation and verify owner_id
+    - No API endpoint may accept owner_id as a client parameter — it MUST come from the JWT

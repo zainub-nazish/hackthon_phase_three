@@ -1,0 +1,215 @@
+openapi: 3.1.0
+info:
+  title: Chat API
+  version: 1.0.0
+  description: Chat API & Conversation Persistence for 007-chat-api
+
+paths:
+  /api/v1/users/{user_id}/chat:
+    post:
+      operationId: sendMessage
+      summary: Send a chat message and receive an AI response
+      tags: [Chat]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Authenticated user's ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: AI response returned successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          description: Invalid input (empty message or exceeds 2000 chars)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid session token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Conversation not found or belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: AI service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/{user_id}/conversations:
+    get:
+      operationId: getRecentConversation
+      summary: Get the user's most recent conversation
+      tags: [Chat]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Most recent conversation or null if none exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/{user_id}/conversations/{conversation_id}/messages:
+    get:
+      operationId: getConversationMessages
+      summary: Load conversation message history
+      tags: [Chat]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Conversation messages in chronological order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Conversation not found or belongs to another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Better Auth session token
+
+  schemas:
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID of existing conversation, or null to create new
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User's natural language message
+
+    ChatResponse:
+      type: object
+      required: [conversation_id, response]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          description: Conversation UUID (new if first message)
+        response:
+          type: string
+          description: AI assistant's response text
+
+    ConversationResponse:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Most recent conversation UUID, or null if none
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    MessageItem:
+      type: object
+      required: [id, conversation_id, role, content, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    MessagesResponse:
+      type: object
+      required: [conversation_id, messages]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageItem'
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: Human-readable error message

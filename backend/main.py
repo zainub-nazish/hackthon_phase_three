@@ -67,7 +67,8 @@ async def health_check():
 
 
 # Import and register routers after app is created
-from backend.routes import auth, tasks
+from backend.routes import auth, tasks, chat
 
 app.include_router(auth.router)
 app.include_router(tasks.router)
+app.include_router(chat.router)

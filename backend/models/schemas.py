@@ -92,3 +92,60 @@ class TaskListResponse(BaseModel):
     total: int = Field(..., description="Total number of tasks")
     limit: Optional[int] = Field(None, description="Requested limit")
     offset: Optional[int] = Field(None, description="Requested offset")
+
+
+# =============================================================================
+# Chat Models (007-chat-api)
+# =============================================================================
+
+
+class ChatRequest(BaseModel):
+    """Request body for sending a chat message."""
+
+    conversation_id: Optional[UUID] = Field(
+        None, description="UUID of existing conversation, or null to create new"
+    )
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="User's natural language message"
+    )
+
+
+class ChatResponse(BaseModel):
+    """Response body for a chat message."""
+
+    conversation_id: UUID = Field(..., description="Conversation UUID (new if first message)")
+    response: str = Field(..., description="AI assistant's response text")
+
+
+class MessageResponse(BaseModel):
+    """Response body for a single message."""
+
+    id: UUID = Field(..., description="Unique message identifier")
+    conversation_id: UUID = Field(..., description="Parent conversation ID")
+    role: str = Field(..., description="Sender role: 'user' or 'assistant'")
+    content: str = Field(..., description="Message text content")
+    created_at: datetime = Field(..., description="Message timestamp")
+
+    model_config = {"from_attributes": True}
+
+
+class MessagesResponse(BaseModel):
+    """Response body for conversation messages."""
+
+    conversation_id: UUID = Field(..., description="Conversation UUID")
+    messages: list[MessageResponse] = Field(
+        default_factory=list, description="Messages in chronological order"
+    )
+
+
+class ConversationResponse(BaseModel):
+    """Response body for conversation metadata."""
+
+    conversation_id: Optional[UUID] = Field(
+        None, description="Most recent conversation UUID, or null if none"
+    )
+    created_at: Optional[datetime] = Field(None, description="Creation timestamp")
+    updated_at: Optional[datetime] = Field(None, description="Last activity timestamp")

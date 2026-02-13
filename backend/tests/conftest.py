@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from fastapi import Path
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
@@ -210,6 +211,36 @@ def token_missing_iat(test_user_id: str) -> str:
     return jwt.encode(payload, TEST_SECRET, algorithm=TEST_ALGORITHM)
 
 
+def _setup_test_app():
+    """Reload modules and return a fresh app with test database."""
+    import os
+
+    os.environ["BETTER_AUTH_SECRET"] = TEST_SECRET
+    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+
+    import importlib
+    import backend.config
+    import backend.database
+    import backend.services.mcp_tools
+    import backend.services.mcp_bridge
+    import backend.services.ai_agent
+    import backend.routes.tasks
+    import backend.routes.chat
+    import backend.main
+
+    importlib.reload(backend.config)
+    importlib.reload(backend.database)
+    importlib.reload(backend.services.mcp_tools)
+    importlib.reload(backend.services.mcp_bridge)
+    importlib.reload(backend.services.ai_agent)
+    importlib.reload(backend.routes.tasks)
+    importlib.reload(backend.routes.chat)
+    importlib.reload(backend.main)
+
+    from backend.main import app
+    return app
+
+
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:
     """
@@ -218,26 +249,46 @@ def client() -> Generator[TestClient, None, None]:
     Patches BETTER_AUTH_SECRET and DATABASE_URL for testing.
     Uses SQLite in-memory database for fast, isolated tests.
     """
-    import os
+    app = _setup_test_app()
 
-    # Set test environment variables before importing the app
-    os.environ["BETTER_AUTH_SECRET"] = TEST_SECRET
-    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+    with TestClient(app) as c:
+        yield c
 
-    # Need to reload modules to pick up new environment variables
-    # Force reimport to get fresh settings
-    import importlib
-    import backend.config
-    import backend.database
-    import backend.main
-    import backend.routes.tasks
 
-    importlib.reload(backend.config)
-    importlib.reload(backend.database)
-    importlib.reload(backend.routes.tasks)
-    importlib.reload(backend.main)
+@pytest.fixture
+def chat_client(test_user_id: str) -> Generator[TestClient, None, None]:
+    """
+    Create a test client with mocked auth for chat endpoint tests.
 
-    from backend.main import app
+    Overrides verify_user_owns_resource to bypass DB session lookup,
+    allowing tests to focus on chat logic rather than auth.
+    """
+    app = _setup_test_app()
+
+    from backend.auth.dependencies import verify_user_owns_resource
+    from backend.models.schemas import CurrentUser
+
+    async def mock_verify_user(
+        user_id: str = Path(..., description="User ID from URL path"),
+    ) -> CurrentUser:
+        return CurrentUser(user_id=user_id, email="test@example.com")
+
+    app.dependency_overrides[verify_user_owns_resource] = mock_verify_user
+
+    with TestClient(app) as c:
+        yield c
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def raw_chat_client() -> Generator[TestClient, None, None]:
+    """
+    Test client WITHOUT auth override for testing 401 responses.
+
+    Auth will fail because session/user tables don't exist in test DB.
+    """
+    app = _setup_test_app()
 
     with TestClient(app) as c:
         yield c
@@ -250,25 +301,7 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
 
     Uses SQLite in-memory database for fast, isolated tests.
     """
-    import os
-
-    # Set test environment variables
-    os.environ["BETTER_AUTH_SECRET"] = TEST_SECRET
-    os.environ["DATABASE_URL"] = TEST_DATABASE_URL
-
-    # Force reimport to get fresh settings
-    import importlib
-    import backend.config
-    import backend.database
-    import backend.main
-    import backend.routes.tasks
-
-    importlib.reload(backend.config)
-    importlib.reload(backend.database)
-    importlib.reload(backend.routes.tasks)
-    importlib.reload(backend.main)
-
-    from backend.main import app
+    app = _setup_test_app()
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
@@ -287,3 +320,141 @@ def auth_header(valid_token: str) -> dict[str, str]:
 def another_user_auth_header(another_user_token: str) -> dict[str, str]:
     """Create Authorization header for another user."""
     return {"Authorization": f"Bearer {another_user_token}"}
+
+
+# =============================================================================
+# Chat Test Helpers (T010)
+# =============================================================================
+
+
+def create_test_conversation(client: TestClient, user_id: str, message: str = "Hello") -> dict:
+    """Create a test conversation by sending a message. Returns ChatResponse dict."""
+    response = client.post(
+        f"/api/v1/users/{user_id}/chat",
+        json={"conversation_id": None, "message": message},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def create_test_message(
+    client: TestClient, user_id: str, conversation_id: str, message: str
+) -> dict:
+    """Send a message to an existing conversation. Returns ChatResponse dict."""
+    response = client.post(
+        f"/api/v1/users/{user_id}/chat",
+        json={"conversation_id": conversation_id, "message": message},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+# =============================================================================
+# AI Agent Test Helpers (T014)
+# =============================================================================
+
+
+@pytest_asyncio.fixture
+async def agent_db(tmp_path):
+    """Initialize test database for direct tool executor testing.
+
+    Creates a file-based SQLite engine, creates tables, and patches
+    _get_db_session in the ai_agent module to use this test engine.
+    Uses unittest.mock.patch for reliable module-level patching.
+    """
+    from contextlib import asynccontextmanager
+    from unittest.mock import patch
+
+    db_file = tmp_path / "agent_test.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+
+    engine = create_async_engine(db_url)
+    test_session_maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    # Import models to register them with SQLModel.metadata BEFORE create_all
+    import backend.models.database  # noqa: F401 — registers Task, Conversation, Message, ToolCall
+
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    @asynccontextmanager
+    async def _test_get_db_session():
+        async with test_session_maker() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+
+    with patch("backend.services.mcp_tools._get_db_session", _test_get_db_session):
+        yield
+
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def mcp_db(tmp_path):
+    """Initialize test database for MCP tool handler testing.
+
+    Same pattern as agent_db but patches _get_db_session in the
+    mcp_tools module (where MCP tool handlers live).
+    """
+    from contextlib import asynccontextmanager
+    from unittest.mock import patch
+
+    db_file = tmp_path / "mcp_test.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+
+    engine = create_async_engine(db_url)
+    test_session_maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    import backend.models.database  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+
+    @asynccontextmanager
+    async def _test_get_db_session():
+        async with test_session_maker() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+
+    with patch("backend.services.mcp_tools._get_db_session", _test_get_db_session):
+        yield
+
+    await engine.dispose()
+
+
+def make_tool_use_response(tool_name: str, tool_input: dict, tool_use_id: str = "toolu_test123"):
+    """Create a mock Claude response with stop_reason='tool_use' and a tool_use content block."""
+    from unittest.mock import MagicMock
+
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    tool_block.name = tool_name
+    tool_block.input = tool_input
+    tool_block.id = tool_use_id
+
+    response = MagicMock()
+    response.stop_reason = "tool_use"
+    response.content = [tool_block]
+
+    return response
+
+
+def make_text_response(text: str):
+    """Create a mock Claude response with stop_reason='end_turn' and a text content block."""
+    from unittest.mock import MagicMock
+
+    text_block = MagicMock()
+    text_block.type = "text"
+    text_block.text = text
+
+    response = MagicMock()
+    response.stop_reason = "end_turn"
+    response.content = [text_block]
+
+    return response
