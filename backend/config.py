@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Better Auth Configuration
     better_auth_url: str = Field(
-        default="http://localhost:3000",
+        default="https://frontend-delta-two-31.vercel.app",
         alias="BETTER_AUTH_URL",
         description="URL of the Better Auth frontend for session verification"
     )

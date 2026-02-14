@@ -18,6 +18,7 @@ from backend.models.schemas import (
     CurrentUser,
     ChatRequest,
     ChatResponse,
+    ToolCallResponse,
     MessageResponse,
     MessagesResponse,
     ConversationResponse,
@@ -165,6 +166,15 @@ async def send_message(
     return ChatResponse(
         conversation_id=conversation.id,
         response=agent_response.content,
+        tool_calls=[
+            ToolCallResponse(
+                tool_name=tc.tool_name,
+                parameters=tc.parameters,
+                result=tc.result,
+                status=tc.status,
+            )
+            for tc in agent_response.tool_calls
+        ],
     )
 
 
