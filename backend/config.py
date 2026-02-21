@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # Better Auth Configuration
     better_auth_url: str = Field(
-        default="http://localhost:3000",
+        default="https://frontend-delta-two-31.vercel.app",
         alias="BETTER_AUTH_URL",
         description="URL of the Better Auth frontend for session verification"
     )
@@ -42,16 +42,11 @@ class Settings(BaseSettings):
     debug: bool = Field(default=False, alias="DEBUG")
     environment: str = Field(default="development", alias="ENVIRONMENT")
 
-    # Anthropic AI Configuration
-    anthropic_api_key: Optional[str] = Field(
+    # OpenAI Configuration
+    openai_api_key: Optional[str] = Field(
         default=None,
-        alias="ANTHROPIC_API_KEY",
-        description="API key for Anthropic Claude AI agent"
-    )
-    anthropic_model: str = Field(
-        default="claude-haiku-4-5-20251001",
-        alias="ANTHROPIC_MODEL",
-        description="Claude model ID for AI agent"
+        alias="OPENAI_API_KEY",
+        description="API key for OpenAI Agents SDK"
     )
 
     # CORS Configuration

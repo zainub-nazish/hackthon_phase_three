@@ -217,12 +217,13 @@ def _setup_test_app():
 
     os.environ["BETTER_AUTH_SECRET"] = TEST_SECRET
     os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+    os.environ["OPENAI_API_KEY"] = ""  # Ensure stub fallback in tests
 
     import importlib
     import backend.config
     import backend.database
+    import backend.auth.dependencies
     import backend.services.mcp_tools
-    import backend.services.mcp_bridge
     import backend.services.ai_agent
     import backend.routes.tasks
     import backend.routes.chat
@@ -230,8 +231,8 @@ def _setup_test_app():
 
     importlib.reload(backend.config)
     importlib.reload(backend.database)
+    importlib.reload(backend.auth.dependencies)
     importlib.reload(backend.services.mcp_tools)
-    importlib.reload(backend.services.mcp_bridge)
     importlib.reload(backend.services.ai_agent)
     importlib.reload(backend.routes.tasks)
     importlib.reload(backend.routes.chat)
@@ -428,33 +429,36 @@ async def mcp_db(tmp_path):
     await engine.dispose()
 
 
-def make_tool_use_response(tool_name: str, tool_input: dict, tool_use_id: str = "toolu_test123"):
-    """Create a mock Claude response with stop_reason='tool_use' and a tool_use content block."""
+def make_agent_run_result(final_output: str, tool_calls: list[dict] | None = None):
+    """Create a mock OpenAI Agents SDK RunResult.
+
+    Args:
+        final_output: The agent's final text response.
+        tool_calls: Optional list of dicts with 'name', 'arguments', 'output' keys.
+    """
     from unittest.mock import MagicMock
 
-    tool_block = MagicMock()
-    tool_block.type = "tool_use"
-    tool_block.name = tool_name
-    tool_block.input = tool_input
-    tool_block.id = tool_use_id
+    result = MagicMock()
+    result.final_output = final_output
+    result.new_items = []
 
-    response = MagicMock()
-    response.stop_reason = "tool_use"
-    response.content = [tool_block]
+    if tool_calls:
+        for tc in tool_calls:
+            # Function call item
+            call_item = MagicMock()
+            call_raw = MagicMock()
+            call_raw.type = "function_call"
+            call_raw.name = tc["name"]
+            call_raw.arguments = tc.get("arguments", "{}")
+            call_item.raw_item = call_raw
+            result.new_items.append(call_item)
 
-    return response
+            # Function call output item
+            output_item = MagicMock()
+            output_raw = MagicMock()
+            output_raw.type = "function_call_output"
+            output_raw.output = tc.get("output", "")
+            output_item.raw_item = output_raw
+            result.new_items.append(output_item)
 
-
-def make_text_response(text: str):
-    """Create a mock Claude response with stop_reason='end_turn' and a text content block."""
-    from unittest.mock import MagicMock
-
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = text
-
-    response = MagicMock()
-    response.stop_reason = "end_turn"
-    response.content = [text_block]
-
-    return response
+    return result

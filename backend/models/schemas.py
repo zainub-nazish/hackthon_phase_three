@@ -55,7 +55,7 @@ class ErrorResponse(BaseModel):
 class TaskBase(BaseModel):
     """Base task attributes."""
 
-    title: str = Field(..., min_length=1, max_length=255, description="Task title")
+    title: str = Field(..., min_length=1, max_length=200, description="Task title")
     description: Optional[str] = Field(None, max_length=2000, description="Task details")
     completed: bool = Field(default=False, description="Completion status")
 
@@ -69,7 +69,7 @@ class TaskCreate(TaskBase):
 class TaskUpdate(BaseModel):
     """Request body for updating a task (partial update)."""
 
-    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = Field(None, max_length=2000)
     completed: Optional[bool] = None
 
@@ -113,11 +113,23 @@ class ChatRequest(BaseModel):
     )
 
 
+class ToolCallResponse(BaseModel):
+    """Response body for a single tool call made by the AI agent."""
+
+    tool_name: str = Field(..., description="Name of the MCP tool invoked")
+    parameters: str = Field(..., description="JSON-encoded tool parameters")
+    result: str = Field(..., description="JSON-encoded tool result")
+    status: str = Field(..., description="'success' or 'error'")
+
+
 class ChatResponse(BaseModel):
     """Response body for a chat message."""
 
     conversation_id: UUID = Field(..., description="Conversation UUID (new if first message)")
     response: str = Field(..., description="AI assistant's response text")
+    tool_calls: list[ToolCallResponse] = Field(
+        default_factory=list, description="Tool calls made during this response"
+    )
 
 
 class MessageResponse(BaseModel):

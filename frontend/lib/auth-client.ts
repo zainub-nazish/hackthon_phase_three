@@ -46,8 +46,10 @@ export async function getAuthToken(): Promise<string | null> {
     if (session?.data?.session?.token) {
       return session.data.session.token;
     }
+    console.warn("[Auth] No session token found in session data:", JSON.stringify(session?.data, null, 2));
     return null;
-  } catch {
+  } catch (err) {
+    console.error("[Auth] getAuthToken error:", err);
     return null;
   }
 }

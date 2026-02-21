@@ -23,7 +23,7 @@ class Task(SQLModel, table=True):
         description="User ID from JWT sub claim"
     )
     title: str = Field(
-        max_length=255,
+        max_length=200,
         nullable=False,
         description="Task title"
     )

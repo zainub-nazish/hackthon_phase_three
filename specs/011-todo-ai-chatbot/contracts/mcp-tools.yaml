@@ -1,0 +1,114 @@
+# MCP Tools Contract: Todo AI Chatbot
+# These tools are registered with the OpenAI Agent via MCPServerStdio
+
+tools:
+  - name: add_task
+    description: Create a new task for the user
+    parameters:
+      user_id:
+        type: string
+        required: true
+        description: The authenticated user's ID
+      title:
+        type: string
+        required: true
+        description: Task title (max 200 chars)
+      description:
+        type: string
+        required: false
+        description: Task description (max 2000 chars)
+    returns:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: string }
+        completed: { type: boolean }
+        created_at: { type: string }
+
+  - name: list_tasks
+    description: List tasks for the user, optionally filtered by status
+    parameters:
+      user_id:
+        type: string
+        required: true
+        description: The authenticated user's ID
+      status:
+        type: string
+        required: false
+        enum: [all, pending, completed]
+        default: all
+        description: Filter tasks by completion status
+    returns:
+      type: array
+      items:
+        type: object
+        properties:
+          id: { type: integer }
+          title: { type: string }
+          description: { type: string }
+          completed: { type: boolean }
+          created_at: { type: string }
+
+  - name: complete_task
+    description: Mark a task as completed
+    parameters:
+      user_id:
+        type: string
+        required: true
+        description: The authenticated user's ID
+      task_id:
+        type: integer
+        required: true
+        description: ID of the task to complete
+    returns:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        completed: { type: boolean }
+
+  - name: delete_task
+    description: Permanently delete a task
+    parameters:
+      user_id:
+        type: string
+        required: true
+        description: The authenticated user's ID
+      task_id:
+        type: integer
+        required: true
+        description: ID of the task to delete
+    returns:
+      type: object
+      properties:
+        success: { type: boolean }
+        deleted_task_id: { type: integer }
+
+  - name: update_task
+    description: Update a task's title and/or description
+    parameters:
+      user_id:
+        type: string
+        required: true
+        description: The authenticated user's ID
+      task_id:
+        type: integer
+        required: true
+        description: ID of the task to update
+      title:
+        type: string
+        required: false
+        description: New task title
+      description:
+        type: string
+        required: false
+        description: New task description
+    returns:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        description: { type: string }
+        completed: { type: boolean }
+        updated_at: { type: string }

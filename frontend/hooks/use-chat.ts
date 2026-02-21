@@ -114,6 +114,10 @@ export function useChat(userId: string) {
           isLoading: false,
         }));
       } catch (err) {
+        console.error("[Chat] sendMessage error:", err);
+        if (err instanceof ApiError) {
+          console.error("[Chat] ApiError status:", err.status, "data:", err.data);
+        }
         // Surface 401 status for auth redirect handling
         const is401 = err instanceof ApiError && err.status === 401;
         const message = is401

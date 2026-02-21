@@ -7,7 +7,9 @@
 
 import { getAuthToken } from "./auth-client";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// NEXT_PUBLIC_API_URL is locked to phase-three in vercel.json env (overrides Vercel project settings).
+// Falls back to relative URL so Next.js/Vercel rewrites handle routing.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 /**
  * API client error with status code.
@@ -52,7 +54,9 @@ export async function apiClient<T>(
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${endpoint}`, {
+    const url = `${API_URL}${endpoint}`;
+    console.log(`[API] ${options.method || "GET"} ${url}`, token ? "(token attached)" : "(no token)");
+    response = await fetch(url, {
       ...options,
       headers,
       credentials: "include", // Include cookies for CORS

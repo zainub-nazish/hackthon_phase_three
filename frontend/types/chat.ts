@@ -33,9 +33,17 @@ export interface ChatRequest {
   message: string;
 }
 
+export interface ToolCall {
+  tool_name: string;
+  parameters: string;
+  result: string;
+  status: string;
+}
+
 export interface ChatResponse {
   conversation_id: string;
   response: string;
+  tool_calls: ToolCall[];
 }
 
 export interface ConversationResponse {
@@ -60,4 +68,4 @@ export interface ChatState {
   error: string | null;
 }
 
-export const MAX_MESSAGE_LENGTH = 2000;
+export const MAX_MESSAGE_LENGTH = 1000;
