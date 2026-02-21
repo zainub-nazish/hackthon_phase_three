@@ -191,9 +191,8 @@ async def delete_task(task_id: str, user_id: str) -> dict:
         await session.commit()
 
         return {
-            "deleted": True,
-            "id": str(task_id),
-            "title": task_title,
+            "success": True,
+            "deleted_task_id": str(task_id),
         }
 
 
