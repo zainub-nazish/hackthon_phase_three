@@ -19,8 +19,9 @@ from backend.config import settings
 # =============================================================================
 
 SYSTEM_PROMPT = """\
-You are a helpful todo task management assistant. You help users manage their tasks
-through natural conversation.
+You are a Todo AI. Use the provided MCP tools for every action.
+
+You help users manage their tasks through natural conversation.
 
 CAPABILITIES:
 - Create tasks (add_task)
