@@ -1,0 +1,246 @@
+openapi: "3.1.0"
+info:
+  title: Todo AI Chatbot API
+  version: "1.0.0"
+  description: |
+    Chat endpoints for the AI-powered task management assistant.
+    All endpoints require Bearer token authentication (Better Auth JWT).
+
+servers:
+  - url: https://zainubnazish-phase-three-huggies.hf.space
+    description: HF Space (production)
+  - url: http://localhost:8000
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: Natural language message from the user
+          example: "Add buy groceries to my list"
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID of existing conversation. Omit or null to start a new one.
+          example: "a5308f26-45d4-470b-9e74-bfbeb000dc90"
+
+    ToolCallResponse:
+      type: object
+      properties:
+        tool_name:
+          type: string
+          description: Name of the MCP tool invoked
+          example: "add_task"
+        parameters:
+          type: string
+          description: JSON-encoded tool input parameters
+          example: '{"title": "buy groceries", "user_id": "abc123"}'
+        result:
+          type: string
+          description: JSON-encoded tool output
+          example: '{"id": "uuid", "title": "buy groceries", "completed": false}'
+        status:
+          type: string
+          enum: [success, error]
+          description: Tool execution status
+
+    ChatResponse:
+      type: object
+      required: [conversation_id, response, tool_calls]
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          description: UUID of the conversation (new if first message)
+          example: "a5308f26-45d4-470b-9e74-bfbeb000dc90"
+        response:
+          type: string
+          description: AI assistant's natural language reply
+          example: "Done! I've added 'buy groceries' to your task list."
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCallResponse"
+          description: Tool calls made during this response (may be empty)
+
+    MessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    MessagesResponse:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageResponse"
+
+    ConversationResponse:
+      type: object
+      properties:
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+
+paths:
+  /api/v1/users/{user_id}/chat:
+    post:
+      summary: Send a chat message
+      description: |
+        Send a natural language message to the AI assistant.
+        - If conversation_id is null/omitted, a new conversation is created.
+        - User message and assistant response are both persisted to the database.
+        - The assistant may invoke MCP tools (add/list/complete/delete/update task)
+          in an autonomous loop before responding.
+      operationId: sendMessage
+      tags: [Chat]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Authenticated user's ID (must match JWT sub claim)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+            examples:
+              new_conversation:
+                summary: Start a new conversation
+                value:
+                  message: "Add buy groceries to my list"
+              continue_conversation:
+                summary: Continue existing conversation
+                value:
+                  message: "I'm done with groceries"
+                  conversation_id: "a5308f26-45d4-470b-9e74-bfbeb000dc90"
+      responses:
+        "200":
+          description: AI assistant response with optional tool call details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          description: Message is empty or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid Bearer token
+        "403":
+          description: user_id in path does not match JWT sub claim
+        "404":
+          description: conversation_id not found or does not belong to this user
+        "502":
+          description: AI service (model) unavailable
+        "503":
+          description: Database not configured
+
+  /api/v1/users/{user_id}/conversations:
+    get:
+      summary: Get most recent conversation
+      description: Returns metadata for the user's most recently active conversation.
+      operationId: getRecentConversation
+      tags: [Chat]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Most recent conversation, or conversation_id=null if none exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+        "401":
+          description: Missing or invalid Bearer token
+        "403":
+          description: Forbidden
+
+  /api/v1/users/{user_id}/conversations/{conversation_id}/messages:
+    get:
+      summary: Get messages in a conversation
+      description: Returns all messages in chronological order for the specified conversation.
+      operationId: getConversationMessages
+      tags: [Chat]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ordered list of messages in the conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagesResponse"
+        "401":
+          description: Missing or invalid Bearer token
+        "403":
+          description: Forbidden
+        "404":
+          description: Conversation not found or does not belong to this user

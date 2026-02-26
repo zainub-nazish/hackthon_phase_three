@@ -1,7 +1,6 @@
-"""Tests for MCP tool handlers and bridge.
+"""Tests for MCP tool handlers.
 
 Tests are organized by user story, matching the structure in tasks.md:
-- TestMCPBridge: Bridge schema conversion and dispatch (Phase 2)
 - TestMCPAddTask: US1 add_task tool handler
 - TestMCPListTasks: US2 list_tasks tool handler
 - TestMCPCompleteTask: US3 complete_task tool handler
@@ -13,50 +12,6 @@ Tests are organized by user story, matching the structure in tasks.md:
 from uuid import uuid4
 
 import pytest
-
-
-# =============================================================================
-# Phase 2: Bridge Tests (T005)
-# =============================================================================
-
-
-class TestMCPBridge:
-    """Tests for MCP bridge schema conversion and dispatch."""
-
-    def test_get_tool_schemas_returns_five_tools(self):
-        from backend.services.mcp_bridge import get_tool_schemas
-
-        schemas = get_tool_schemas()
-        assert len(schemas) == 5
-
-        names = {s["name"] for s in schemas}
-        assert names == {"add_task", "list_tasks", "complete_task", "delete_task", "update_task"}
-
-    def test_schemas_have_required_keys(self):
-        from backend.services.mcp_bridge import get_tool_schemas
-
-        for schema in get_tool_schemas():
-            assert "name" in schema
-            assert "description" in schema
-            assert "input_schema" in schema
-            assert schema["input_schema"]["type"] == "object"
-
-    def test_schemas_exclude_user_id(self):
-        from backend.services.mcp_bridge import get_tool_schemas
-
-        for schema in get_tool_schemas():
-            props = schema["input_schema"].get("properties", {})
-            assert "user_id" not in props, f"user_id leaked in {schema['name']} schema"
-            required = schema["input_schema"].get("required", [])
-            assert "user_id" not in required
-
-    @pytest.mark.asyncio
-    async def test_execute_unknown_tool_returns_error(self):
-        from backend.services.mcp_bridge import execute_tool
-
-        result = await execute_tool("nonexistent_tool", {}, str(uuid4()))
-        assert result["is_error"] is True
-        assert "Unknown tool" in result["error"]
 
 
 # =============================================================================
@@ -107,7 +62,7 @@ class TestMCPAddTask:
         result = await add_task(title="x" * 256, user_id=str(uuid4()))
 
         assert result["is_error"] is True
-        assert "255" in result["error"]
+        assert "200" in result["error"]
 
 
 # =============================================================================
@@ -308,8 +263,8 @@ class TestMCPDeleteTask:
 
         result = await delete_task(task_id=task["id"], user_id=user_id)
 
-        assert result["deleted"] is True
-        assert result["title"] == "To delete"
+        assert result["success"] is True
+        assert result["deleted_task_id"] == task["id"]
 
         # Verify it's actually gone
         list_result = await list_tasks(user_id=user_id)

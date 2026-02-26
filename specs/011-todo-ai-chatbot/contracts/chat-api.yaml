@@ -1,0 +1,185 @@
+openapi: "3.1.0"
+info:
+  title: Todo AI Chatbot API
+  version: "1.0.0"
+  description: Chat endpoint for AI-powered task management
+
+paths:
+  /api/v1/users/{user_id}/chat:
+    post:
+      operationId: sendChatMessage
+      summary: Send a chat message and receive AI response
+      description: |
+        Accepts a user message, loads conversation history from DB,
+        runs the OpenAI Agent with MCP tools, persists messages,
+        and returns the assistant response.
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Authenticated user's ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Successful AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          description: Invalid request (empty message, exceeds length)
+        "401":
+          description: Not authenticated
+        "404":
+          description: User mismatch (IDOR prevention)
+        "500":
+          description: AI agent or database error
+
+  /api/v1/users/{user_id}/conversations:
+    get:
+      operationId: getRecentConversation
+      summary: Get user's most recent conversation
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Most recent conversation metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationResponse"
+        "401":
+          description: Not authenticated
+        "404":
+          description: No conversations found or user mismatch
+
+  /api/v1/users/{user_id}/conversations/{conversation_id}/messages:
+    get:
+      operationId: getConversationMessages
+      summary: Get all messages in a conversation
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages ordered by creation time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagesResponse"
+        "401":
+          description: Not authenticated
+        "404":
+          description: Conversation not found or user mismatch
+
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        conversation_id:
+          type: integer
+          nullable: true
+          description: Existing conversation ID, or null to auto-create
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: User's natural language message
+
+    ChatResponse:
+      type: object
+      required:
+        - conversation_id
+        - response
+      properties:
+        conversation_id:
+          type: integer
+          description: The conversation this message belongs to
+        response:
+          type: string
+          description: AI assistant's response text
+        tool_calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolCallRecord"
+          description: Tools invoked during this interaction
+
+    ToolCallRecord:
+      type: object
+      properties:
+        tool_name:
+          type: string
+          enum: [add_task, list_tasks, complete_task, delete_task, update_task]
+        parameters:
+          type: object
+        result:
+          type: string
+
+    ConversationResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MessagesResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MessageItem"
+
+    MessageItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversation_id:
+          type: integer
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Better Auth session token
+
+security:
+  - BearerAuth: []

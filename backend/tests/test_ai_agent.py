@@ -1,22 +1,21 @@
-"""Unit tests for AI agent tool executors (via MCP tools) and agent loop."""
+"""Unit tests for AI agent service (OpenAI Agents SDK)."""
 
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-import pytest_asyncio
 
-from backend.tests.conftest import make_tool_use_response, make_text_response
+from backend.tests.conftest import make_agent_run_result
 
 
 # =============================================================================
-# Tool Executor Tests (T015)
+# Tool Executor Tests (via MCP tools directly)
 # =============================================================================
 
 
 class TestAddTask:
-    """Tests for add_task tool executor (via MCP tools)."""
+    """Tests for add_task tool executor."""
 
     @pytest.mark.asyncio
     async def test_add_task_creates_task(self, agent_db):
@@ -58,11 +57,11 @@ class TestAddTask:
         result = await add_task(title="x" * 256, user_id=str(uuid4()))
 
         assert result["is_error"] is True
-        assert "255" in result["error"]
+        assert "200" in result["error"]
 
 
 class TestListTasks:
-    """Tests for list_tasks tool executor (via MCP tools)."""
+    """Tests for list_tasks tool executor."""
 
     @pytest.mark.asyncio
     async def test_list_tasks_returns_all(self, agent_db):
@@ -134,7 +133,7 @@ class TestListTasks:
 
 
 class TestCompleteTask:
-    """Tests for complete_task tool executor (via MCP tools)."""
+    """Tests for complete_task tool executor."""
 
     @pytest.mark.asyncio
     async def test_complete_task_success(self, agent_db):
@@ -174,7 +173,7 @@ class TestCompleteTask:
 
 
 class TestDeleteTask:
-    """Tests for delete_task tool executor (via MCP tools)."""
+    """Tests for delete_task tool executor."""
 
     @pytest.mark.asyncio
     async def test_delete_task_success(self, agent_db):
@@ -188,7 +187,6 @@ class TestDeleteTask:
         assert result["deleted"] is True
         assert result["title"] == "To delete"
 
-        # Verify it's actually gone
         list_result = await list_tasks(user_id=user_id)
         assert list_result["count"] == 0
 
@@ -217,7 +215,7 @@ class TestDeleteTask:
 
 
 class TestUpdateTask:
-    """Tests for update_task tool executor (via MCP tools)."""
+    """Tests for update_task tool executor."""
 
     @pytest.mark.asyncio
     async def test_update_task_title(self, agent_db):
@@ -271,91 +269,78 @@ class TestUpdateTask:
 
 
 # =============================================================================
-# Agent Loop Tests (T016)
+# Agent Service Tests (OpenAI Agents SDK)
 # =============================================================================
 
 
-class TestAgentLoopSingleToolCall:
-    """Test agent loop with a single tool call flow."""
+class TestAgentWithToolCalls:
+    """Test agent service processes messages and returns tool call data."""
 
     @pytest.mark.asyncio
-    async def test_agent_loop_single_tool_call(self, agent_db):
+    async def test_agent_single_tool_call(self, agent_db):
         from backend.services.ai_agent import AIAgentService
 
         agent = AIAgentService()
         messages = [{"role": "user", "content": "Add a task to buy milk"}]
 
-        # Mock: first call returns tool_use, second call returns text
-        tool_response = make_tool_use_response(
-            "add_task", {"title": "Buy milk"}, "toolu_abc123"
+        mock_result = make_agent_run_result(
+            final_output="I've added 'Buy milk' to your task list!",
+            tool_calls=[{
+                "name": "add_task",
+                "arguments": '{"title": "Buy milk", "user_id": "test-user"}',
+                "output": '{"id": "123", "title": "Buy milk", "completed": false}',
+            }],
         )
-        text_response = make_text_response("I've added 'Buy milk' to your task list!")
-
-        mock_create = AsyncMock(side_effect=[tool_response, text_response])
 
         with patch("backend.services.ai_agent.settings") as mock_settings:
-            mock_settings.anthropic_api_key = "test-key"
-            mock_settings.anthropic_model = "claude-haiku-4-5-20251001"
+            mock_settings.openai_api_key = "test-key"
 
-            with patch("anthropic.AsyncAnthropic") as MockClient:
-                mock_client_instance = MagicMock()
-                mock_client_instance.messages.create = mock_create
-                MockClient.return_value = mock_client_instance
+            with patch("agents.Runner.run", new_callable=AsyncMock, return_value=mock_result):
+                with patch("agents.mcp.MCPServerStdio") as MockMCP:
+                    mock_mcp_instance = AsyncMock()
+                    MockMCP.return_value.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
+                    MockMCP.return_value.__aexit__ = AsyncMock(return_value=None)
 
-                result = await agent.generate_response(messages, str(uuid4()))
+                    result = await agent.generate_response(messages, str(uuid4()))
 
         assert "Buy milk" in result.content
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].tool_name == "add_task"
         assert result.tool_calls[0].status == "success"
 
-        # Verify tool call data
-        params = json.loads(result.tool_calls[0].parameters)
-        assert params["title"] == "Buy milk"
-
-        tool_result = json.loads(result.tool_calls[0].result)
-        assert "id" in tool_result
-        assert tool_result["title"] == "Buy milk"
-
-
-class TestAgentLoopMultiStep:
-    """Test agent loop with multi-step tool calls (list → delete)."""
-
     @pytest.mark.asyncio
-    async def test_agent_loop_multi_step(self, agent_db):
+    async def test_agent_multi_step_tool_calls(self, agent_db):
         from backend.services.ai_agent import AIAgentService
-        from backend.services.mcp_tools import add_task
-
-        user_id = str(uuid4())
-        # Pre-create a task so delete can find it
-        task = await add_task(title="Old task", user_id=user_id)
 
         agent = AIAgentService()
         messages = [{"role": "user", "content": "Delete the old task"}]
 
-        # Mock: first call lists tasks, second deletes, third returns text
-        list_response = make_tool_use_response(
-            "list_tasks", {}, "toolu_list1"
-        )
-        delete_response = make_tool_use_response(
-            "delete_task", {"task_id": task["id"]}, "toolu_del1"
-        )
-        text_response = make_text_response("I've deleted 'Old task' for you.")
-
-        mock_create = AsyncMock(
-            side_effect=[list_response, delete_response, text_response]
+        mock_result = make_agent_run_result(
+            final_output="I've deleted 'Old task' for you.",
+            tool_calls=[
+                {
+                    "name": "list_tasks",
+                    "arguments": '{"user_id": "test-user"}',
+                    "output": '{"tasks": [{"id": "456", "title": "Old task"}], "count": 1}',
+                },
+                {
+                    "name": "delete_task",
+                    "arguments": '{"task_id": "456", "user_id": "test-user"}',
+                    "output": '{"deleted": true, "title": "Old task"}',
+                },
+            ],
         )
 
         with patch("backend.services.ai_agent.settings") as mock_settings:
-            mock_settings.anthropic_api_key = "test-key"
-            mock_settings.anthropic_model = "claude-haiku-4-5-20251001"
+            mock_settings.openai_api_key = "test-key"
 
-            with patch("anthropic.AsyncAnthropic") as MockClient:
-                mock_client_instance = MagicMock()
-                mock_client_instance.messages.create = mock_create
-                MockClient.return_value = mock_client_instance
+            with patch("agents.Runner.run", new_callable=AsyncMock, return_value=mock_result):
+                with patch("agents.mcp.MCPServerStdio") as MockMCP:
+                    mock_mcp_instance = AsyncMock()
+                    MockMCP.return_value.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
+                    MockMCP.return_value.__aexit__ = AsyncMock(return_value=None)
 
-                result = await agent.generate_response(messages, user_id)
+                    result = await agent.generate_response(messages, str(uuid4()))
 
         assert "Old task" in result.content
         assert len(result.tool_calls) == 2
@@ -363,36 +348,27 @@ class TestAgentLoopMultiStep:
         assert result.tool_calls[1].tool_name == "delete_task"
 
 
-class TestAgentLoopAPIError:
-    """Test agent loop handles Anthropic API errors."""
+class TestAgentAPIError:
+    """Test agent handles API errors."""
 
     @pytest.mark.asyncio
     async def test_api_error_raises_runtime_error(self, agent_db):
-        import anthropic
         from backend.services.ai_agent import AIAgentService
 
         agent = AIAgentService()
         messages = [{"role": "user", "content": "Hello"}]
 
-        mock_create = AsyncMock(
-            side_effect=anthropic.APIError(
-                message="Rate limit exceeded",
-                request=MagicMock(),
-                body=None,
-            )
-        )
-
         with patch("backend.services.ai_agent.settings") as mock_settings:
-            mock_settings.anthropic_api_key = "test-key"
-            mock_settings.anthropic_model = "claude-haiku-4-5-20251001"
+            mock_settings.openai_api_key = "test-key"
 
-            with patch("anthropic.AsyncAnthropic") as MockClient:
-                mock_client_instance = MagicMock()
-                mock_client_instance.messages.create = mock_create
-                MockClient.return_value = mock_client_instance
+            with patch("agents.Runner.run", new_callable=AsyncMock, side_effect=Exception("Rate limit")):
+                with patch("agents.mcp.MCPServerStdio") as MockMCP:
+                    mock_mcp_instance = AsyncMock()
+                    MockMCP.return_value.__aenter__ = AsyncMock(return_value=mock_mcp_instance)
+                    MockMCP.return_value.__aexit__ = AsyncMock(return_value=None)
 
-                with pytest.raises(RuntimeError, match="Anthropic API error"):
-                    await agent.generate_response(messages, str(uuid4()))
+                    with pytest.raises(RuntimeError, match="OpenAI Agent error"):
+                        await agent.generate_response(messages, str(uuid4()))
 
 
 class TestAgentStubFallback:
@@ -406,7 +382,7 @@ class TestAgentStubFallback:
         messages = [{"role": "user", "content": "Hello"}]
 
         with patch("backend.services.ai_agent.settings") as mock_settings:
-            mock_settings.anthropic_api_key = None
+            mock_settings.openai_api_key = None
 
             result = await agent.generate_response(messages, str(uuid4()))
 
@@ -451,7 +427,7 @@ class TestAgentStubFallback:
 
         # Second call should fall back to stub (no API key)
         with patch("backend.services.ai_agent.settings") as mock_settings:
-            mock_settings.anthropic_api_key = None
+            mock_settings.openai_api_key = None
             result2 = await agent.generate_response(
                 [{"role": "user", "content": "Hello"}], str(uuid4())
             )

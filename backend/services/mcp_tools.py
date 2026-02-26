@@ -60,8 +60,8 @@ async def add_task(title: str, user_id: str, description: Optional[str] = None) 
     title = title.strip()
     if not title:
         return {"is_error": True, "error": "Task title is required"}
-    if len(title) > 255:
-        return {"is_error": True, "error": "Task title must be 255 characters or less"}
+    if len(title) > 200:
+        return {"is_error": True, "error": "Task title must be 200 characters or less"}
 
     if description and len(description) > 2000:
         return {"is_error": True, "error": "Task description must be 2000 characters or less"}
@@ -191,9 +191,8 @@ async def delete_task(task_id: str, user_id: str) -> dict:
         await session.commit()
 
         return {
-            "deleted": True,
-            "id": str(task_id),
-            "title": task_title,
+            "success": True,
+            "deleted_task_id": str(task_id),
         }
 
 
@@ -222,8 +221,8 @@ async def update_task(
         title = title.strip()
         if not title:
             return {"is_error": True, "error": "Title cannot be empty"}
-        if len(title) > 255:
-            return {"is_error": True, "error": "Title must be 255 characters or less"}
+        if len(title) > 200:
+            return {"is_error": True, "error": "Title must be 200 characters or less"}
 
     if description is not None and len(description) > 2000:
         return {"is_error": True, "error": "Description must be 2000 characters or less"}
@@ -257,3 +256,11 @@ async def update_task(
             "description": task.description,
             "completed": task.completed,
         }
+
+
+# =============================================================================
+# Stdio Entry Point (for MCPServerStdio in OpenAI Agents SDK)
+# =============================================================================
+
+if __name__ == "__main__":
+    server.run(transport="stdio")

@@ -1,48 +1,50 @@
-"""AI agent service with Anthropic Claude integration and MCP tool dispatch.
+"""AI agent service with OpenAI Agents SDK integration and MCP tool dispatch.
 
-Processes natural language messages, selects and executes MCP tools via the
-bridge, and returns friendly confirmation responses. Tool definitions and
-execution are handled by the MCP tool server (mcp_tools.py) through the
-bridge (mcp_bridge.py).
+Processes natural language messages using the OpenAI Agents SDK with MCP tools
+for todo task management. The agent is stateless — instantiated per-request with
+conversation history loaded from the database.
 """
 
 import json
+import os
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from backend.config import settings
-from backend.services.mcp_bridge import execute_tool, get_tool_schemas
 
 
 # =============================================================================
-# System Prompt (D-004: inline constant)
+# System Prompt
 # =============================================================================
 
 SYSTEM_PROMPT = """\
-You are a friendly AI todo assistant. You help users manage their tasks through natural language conversation.
+You are a Todo AI. Use the provided MCP tools for every action.
 
-## Your Capabilities
-You can create, list, complete, delete, and update tasks for the user.
+You help users manage their tasks through natural conversation.
 
-## Guidelines
-- Always confirm actions with a brief, friendly message
-- When the user asks to complete, delete, or update a task by name, use list_tasks first to find the correct task_id
-- If multiple tasks match the user's description, show the matches and ask which one they mean
-- Never make up or hallucinate task data — only reference tasks that exist in the user's list
-- Resolve references like "it", "that task", or "the last one" from conversation context
-- If you can't determine what the user wants, ask for clarification
-- For non-task messages (greetings, questions about capabilities), respond helpfully without using tools
-- Keep responses concise and conversational
+CAPABILITIES:
+- Create tasks (add_task)
+- List tasks with optional status filter (list_tasks)
+- Mark tasks as completed (complete_task)
+- Delete tasks (delete_task)
+- Update task details (update_task)
 
-## Response Format
-- Task created: include the task title in your confirmation
-- Task listed: present tasks in a readable format with titles and status
-- Task completed/deleted/updated: confirm the specific task that was changed
-- Errors: explain what went wrong in simple terms and suggest what to try
-
-## Important
-- You can only manage tasks — you cannot browse the web, send emails, or perform other actions
-- All task operations only affect the current user's tasks
-- If a tool call fails, explain the error to the user without exposing technical details"""
+RULES:
+- Always use the user_id provided in tool parameters — never use a different user's ID.
+- When a user refers to a task by name/description (not by ID), FIRST call list_tasks to find the
+  matching task ID, THEN perform the requested action (complete, delete, or update).
+  Never guess task IDs.
+- After any task operation, confirm what was done with specific details.
+- For ambiguous requests matching multiple tasks, list the matches and ask the user
+  to clarify which one they mean.
+- For non-task messages (greetings, questions about capabilities), respond conversationally
+  without calling any tools.
+- Never expose internal IDs unless helpful for disambiguation.
+- Keep responses concise and conversational.
+- You can only manage tasks — you cannot browse the web, send emails, or perform other actions.
+- All task operations only affect the current user's tasks.
+- If a tool call fails, explain the error to the user without exposing technical details."""
 
 
 # =============================================================================
@@ -69,12 +71,12 @@ class AgentResponse:
 
 
 # =============================================================================
-# AI Agent Service (D-001: manual agent loop with MCP tool dispatch)
+# AI Agent Service (OpenAI Agents SDK with MCP)
 # =============================================================================
 
 
 class AIAgentService:
-    """AI agent service powered by Anthropic Claude with MCP tool dispatch."""
+    """AI agent service powered by OpenAI Agents SDK with MCP tool dispatch."""
 
     def __init__(self):
         self._stub_response: AgentResponse | None = None
@@ -91,7 +93,8 @@ class AIAgentService:
     ) -> AgentResponse:
         """Generate an AI response given conversation history.
 
-        Implements the agent loop: call Claude → tool_use → execute via MCP → tool_result → repeat.
+        Uses the OpenAI Agents SDK with MCP tools. The SDK runner handles
+        the tool-call loop automatically (call tool → feed result → repeat).
 
         Args:
             messages: List of {"role": str, "content": str} dicts.
@@ -106,92 +109,80 @@ class AIAgentService:
             self._stub_response = None
             return response
 
-        # D-006: Graceful fallback when API key is not configured
-        if not settings.anthropic_api_key:
+        # Graceful fallback when API key is not configured
+        if not settings.openai_api_key:
             return AgentResponse(
                 content="I'm an AI assistant stub. Real AI integration coming soon!",
             )
 
-        # Lazy import — anthropic not required when API key is missing
-        import anthropic
+        # Set the API key for the SDK
+        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        # Lazy imports — not required when API key is missing
+        from agents import Agent, Runner
+        from agents.mcp import MCPServerStdio
+
+        # Resolve project root for subprocess module execution
+        project_root = str(Path(__file__).parent.parent.parent)
+
+        # Inject user_id into the system prompt so the agent passes it to tools
+        system_with_user = (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"IMPORTANT: The current user's ID is: {user_id}\n"
+            f"Always pass this exact user_id when calling any tool."
+        )
+
         tool_calls_data: list[ToolCallData] = []
-        api_messages = list(messages)  # Copy to avoid modifying original
 
         try:
-            while True:
-                response = await client.messages.create(
-                    model=settings.anthropic_model,
-                    max_tokens=1024,
-                    system=SYSTEM_PROMPT,
-                    tools=get_tool_schemas(),
-                    messages=api_messages,
+            async with MCPServerStdio(
+                params={
+                    "command": sys.executable,
+                    "args": ["-m", "backend.services.mcp_tools"],
+                    "cwd": project_root,
+                    "env": {**os.environ},
+                },
+                cache_tools_list=True,
+                client_session_timeout_seconds=30,
+            ) as mcp_server:
+                agent = Agent(
+                    name="TodoBot",
+                    instructions=system_with_user,
+                    mcp_servers=[mcp_server],
                 )
 
-                if response.stop_reason == "end_turn":
-                    # Extract text content from response
-                    text_parts = []
-                    for block in response.content:
-                        if hasattr(block, "text"):
-                            text_parts.append(block.text)
-                    return AgentResponse(
-                        content="".join(text_parts) or "I processed your request.",
-                        tool_calls=tool_calls_data,
-                    )
+                result = await Runner.run(
+                    agent,
+                    input=messages,
+                )
 
-                elif response.stop_reason == "tool_use":
-                    # Add assistant response to message history
-                    api_messages.append({
-                        "role": "assistant",
-                        "content": response.content,
-                    })
-
-                    # Execute each tool via MCP bridge and collect results
-                    tool_results = []
-                    for block in response.content:
-                        if block.type == "tool_use":
-                            result = await execute_tool(block.name, block.input, user_id)
-                            is_error = result.get("is_error", False)
-                            tool_status = "error" if is_error else "success"
-
-                            # Record tool call for DB persistence
+                # Extract tool calls from the run result
+                for item in result.new_items:
+                    if hasattr(item, "raw_item"):
+                        raw = item.raw_item
+                        # Check for tool call items
+                        if hasattr(raw, "type") and raw.type == "function_call":
                             tool_calls_data.append(ToolCallData(
-                                tool_name=block.name,
-                                parameters=json.dumps(block.input),
-                                result=json.dumps(result),
-                                status=tool_status,
+                                tool_name=raw.name,
+                                parameters=raw.arguments,
+                                result="",
+                                status="success",
                             ))
+                        elif hasattr(raw, "type") and raw.type == "function_call_output":
+                            # Match output to the last tool call
+                            if tool_calls_data:
+                                tool_calls_data[-1].result = raw.output if hasattr(raw, "output") else ""
 
-                            # Build tool result for Claude
-                            tool_result_block = {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": json.dumps(result),
-                            }
-                            if is_error:
-                                tool_result_block["is_error"] = True
-                            tool_results.append(tool_result_block)
+                # Extract the final text response
+                final_text = result.final_output or "I processed your request."
 
-                    # Send tool results back to Claude
-                    api_messages.append({
-                        "role": "user",
-                        "content": tool_results,
-                    })
+                return AgentResponse(
+                    content=final_text,
+                    tool_calls=tool_calls_data,
+                )
 
-                else:
-                    # Unexpected stop reason — return whatever text is available
-                    text_parts = []
-                    for block in response.content:
-                        if hasattr(block, "text"):
-                            text_parts.append(block.text)
-                    return AgentResponse(
-                        content="".join(text_parts) or "I encountered an issue. Please try again.",
-                        tool_calls=tool_calls_data,
-                    )
-
-        except anthropic.APIError as e:
-            raise RuntimeError(f"Anthropic API error: {e}") from e
+        except Exception as e:
+            raise RuntimeError(f"OpenAI Agent error: {e}") from e
 
 
 # FastAPI dependency

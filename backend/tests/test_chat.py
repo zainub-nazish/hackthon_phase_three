@@ -315,6 +315,47 @@ class TestToolCallFailurePersisted:
 
 
 # =============================================================================
+# Context Window Tests (T043)
+# =============================================================================
+
+
+class TestContextWindow:
+    """T043: Verify MAX_CONTEXT_MESSAGES=20 limits context passed to agent."""
+
+    def test_context_window_limited_to_20(
+        self, chat_client: TestClient, test_user_id: str
+    ):
+        """When conversation has >20 messages, only the last 20 are sent to agent."""
+        from backend.services.ai_agent import get_ai_agent_service, AgentResponse
+
+        captured_messages = []
+        agent = get_ai_agent_service()
+        original_generate = agent.generate_response
+
+        async def capturing_generate(messages, user_id):
+            captured_messages.clear()
+            captured_messages.extend(messages)
+            return AgentResponse(content="ok", tool_calls=[])
+
+        agent.generate_response = capturing_generate
+
+        try:
+            # Build 22 messages in DB: initial exchange (2) + 10 more exchanges (20)
+            conv_data = create_test_conversation(chat_client, test_user_id, "Msg 1")
+            conv_id = conv_data["conversation_id"]
+            for i in range(2, 12):  # 10 more → 22 messages total in DB
+                create_test_message(chat_client, test_user_id, conv_id, f"Msg {i}")
+
+            # 12th send: user msg persisted → 23 in DB → context loads last 20
+            captured_messages.clear()
+            create_test_message(chat_client, test_user_id, conv_id, "Msg 12")
+
+            assert len(captured_messages) == 20
+        finally:
+            agent.generate_response = original_generate
+
+
+# =============================================================================
 # Edge Case Tests (T034)
 # =============================================================================
 

@@ -34,10 +34,12 @@ def isolation_client(user_a_id: str, user_b_id: str):
     Both user A and user B can make authenticated requests.
     """
     from backend.tests.conftest import _setup_test_app
-    from backend.auth.dependencies import verify_user_owns_resource
     from backend.models.schemas import CurrentUser
 
     app = _setup_test_app()
+
+    # Import AFTER _setup_test_app() so we get the reloaded function object
+    from backend.auth.dependencies import verify_user_owns_resource
 
     async def mock_verify_user(
         user_id: str = Path(..., description="User ID from URL path"),
